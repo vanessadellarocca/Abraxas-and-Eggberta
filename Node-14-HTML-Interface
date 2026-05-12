@@ -1,0 +1,375 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>8888FIRST — Audio Interface</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:monospace;background:#181816;color:#c2c0b6;padding:20px}
+.wrap{max-width:740px;margin:0 auto}
+h1{font-size:11px;font-weight:400;color:#5f5e5a;margin-bottom:16px;letter-spacing:.1em}
+.top{display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.btn{padding:5px 13px;border:0.5px solid #5f5e5a;border-radius:5px;background:transparent;
+     color:#c2c0b6;cursor:pointer;font-size:11px;font-family:monospace;letter-spacing:.04em}
+.btn:hover{background:#2c2c2a}
+.btn.active{border-color:#7f77dd;color:#7f77dd}
+.row{display:flex;gap:12px;align-items:center;font-size:10px;color:#888780;
+     flex-wrap:wrap;margin-bottom:8px}
+.row label{display:flex;align-items:center;gap:5px}
+input[type=range]{width:80px;accent-color:#7f77dd}
+canvas{display:block;border-radius:6px;background:#111110;
+       border:0.5px solid #2c2c2a;margin-bottom:8px;width:100%}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:8px}
+.card{background:#111110;border:0.5px solid #2c2c2a;border-radius:5px;padding:7px 10px}
+.cl{font-size:8px;color:#5f5e5a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+.cv{font-size:17px;font-weight:500;color:#c2c0b6;transition:color .4s}
+.n14{transition:border-color .5s}
+.n14.on{border-color:#639922}
+.n14.on .cv{color:#639922}
+.mono{font-size:8px;color:#5f5e5a;line-height:1.9;
+      border-top:0.5px solid #2c2c2a;padding-top:5px;margin-top:4px}
+.note{font-size:8px;color:#444441;margin-top:10px;line-height:2.0;letter-spacing:.02em}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>8888FIRST &middot; FRACTALCONCEPTIONFIELD &middot; AUDIO INTERFACE</h1>
+<div class="top">
+  <button class="btn" id="btn_start">&#9654; start</button>
+  <button class="btn" id="btn_stop" disabled>&#9632; stop</button>
+  <span style="font-size:10px;color:#444441">t=<span id="t_val">0</span></span>
+  <span style="font-size:10px;color:#888780" id="phase_label"></span>
+  <span style="font-size:10px;color:#639922" id="n14_label"></span>
+</div>
+<div class="row">
+  <label>volume<input type="range" id="vol" min="0" max="100" value="55">
+    <span id="vol_v">55</span></label>
+  <label>speed<input type="range" id="spd" min="1" max="12" value="5">
+    <span id="spd_v">5</span></label>
+</div>
+<canvas id="cv" width="680" height="160"></canvas>
+<div class="g4">
+  <div class="card"><div class="cl">conception</div><div class="cv" id="v_c">0.000</div></div>
+  <div class="card"><div class="cl">fusion</div><div class="cv" id="v_f">0.000</div></div>
+  <div class="card"><div class="cl">bond depth</div><div class="cv" id="v_b">0.000</div></div>
+  <div class="card n14" id="c14"><div class="cl">node 14</div><div class="cv" id="v_14">—</div></div>
+</div>
+<div class="mono" id="log">wartend…</div>
+<div class="note">
+conception → pitch (180–360 Hz, pentatonisch) &nbsp;&middot;&nbsp;
+schumann → AM-Puls (7.83 Hz) &nbsp;&middot;&nbsp;
+12|1 → links &nbsp;&middot;&nbsp; 8|9 → rechts &nbsp;&middot;&nbsp;
+node 14 → Subharmonische (freq/φ) &nbsp;&middot;&nbsp;
+arc_balance → Filter
+</div>
+</div>
+<script>
+const PHI=0.618033988749895,PHI2=PHI*PHI,EPS=1/137,TINY=1e-12;
+
+function makeMotor(){
+  const DAO=6,DAOT=DAO-EPS,RO=PHI,RI=EPS;
+  const SCHM=7*(1/PHI-.5),SCHR=(PHI2/8)*(SCHM/(7/PHI));
+  const S18=SCHM/8,S81=SCHM/(7/PHI),LIFE=3.5,PHIA=7/PHI;
+  const CR=PHI/5,ER=PHI2/5,MR=PHI2/8,TR=PHI/8,PR=PHI/5,LR=PHI/8,RR=PHI/13,COHR=PHI/21,SR=PHI/8;
+  const c01=x=>Math.max(0,Math.min(1,x));
+  const c11=x=>Math.max(-1,Math.min(1,x));
+  const lrp=(a,b,t)=>(1-c01(t))*a+c01(t)*b;
+  const gm=a=>{let p=1,n=0;for(const v of a){if(v<=0)return 0;p*=v;n++;}return n?c01(Math.pow(p,1/n)):0;};
+  const sp=ph=>0.5-0.5*Math.cos(2*Math.PI*ph);
+  const sw=ph=>Math.sin(2*Math.PI*ph);
+  const sc=(a,b,s)=>c01(1-Math.abs(a-b)/Math.max(Math.abs(s),TINY));
+  const pr_=(a,b)=>{a=Math.abs(a);b=Math.abs(b);if(a<TINY||b<TINY)return 0;return c01(1-Math.abs(Math.min(a/b,b/a)-PHI)/PHI);};
+  const pf=(p,r)=>(p+r)%1;
+  const pd=(a,b)=>{const d=Math.abs((a-b)%1);return Math.min(d,1-d);};
+  let dao={r:RO,lo:DAO-PHI,up:DAO+PHI,mid:DAO,ph:0,sph:0,spu:0,it:0,u6:0,ds:0,sp2:0,rd:0};
+  let yang={yr:0,yi:0,gp:0,io:0,ph:0,xl:-PHI};
+  let yin={xl:-PHI,xm:0,xr:PHI,xd:0,xc:0,xf:0,ph:.5};
+  let cp={cc:0,cce:0,sc:0,br:0,ip:0,op:0,pc:0,ce:0};
+  let ha={l2e:0,e2l:0,ab:0,lo:0,up:0,rf:0};
+  let s12={ph:0,pm:EPS},s89={ph:.5,pm:EPS};
+  let ms={o12:0,o89:0,pu:0,re:0,i12:0,i89:0,sc:0,pm:0,pr:0,fl:EPS,tr:0};
+  let ls={co:0,id:1,sc:0,sh:0,sr:0,ph:0};
+  let ref_={ae:0,wi:0,rs:0,gr:0,sr:0,rf:0};
+  let coh={fr:0,cf:.5,rf_:0};
+  let inst={pl:0,rl:0};
+  let bond_ext=0,boost_ext=0;
+  const id_=()=>c01(1-.65*inst.pl-.35*inst.rl);
+  const ib_=()=>c01(.35*inst.pl+.65*inst.rl);
+
+  function step(ch,fd){
+    const dm=id_(),rb=ib_();
+    dao.sph=pf(dao.sph,SCHR);dao.spu=sp(dao.sph);
+    const ld=c01(LIFE/PHIA),ef=c01(.45*coh.cf+.20*coh.rf_+.20*ld+.15*rb);
+    const et=TR*(.8+.4*ef)*(.35+.65*dm);
+    const rd=RI+(RO-RI)*(1-(.5-.5*Math.cos(2*Math.PI*dao.ph)));
+    dao.r=lrp(dao.r,rd,et);
+    dao.lo=lrp(dao.lo,DAO-(dao.r+EPS),et);
+    dao.up=lrp(dao.up,DAO+(dao.r-EPS),et);
+    dao.mid=(dao.lo+dao.up)/2;
+    dao.it=c01((RO-dao.r)/Math.max(RO-RI,TINY));
+    dao.u6=sc(dao.mid,DAOT,PHI);
+    dao.sp2=c01(Math.abs(dao.mid-DAO)/PHI*(1-dao.u6));
+    dao.rd=gm([dao.it+TINY,dao.spu+TINY,dao.u6+TINY,coh.cf+TINY,c01(.8+.2*ls.sh)+TINY]);
+    dao.ds=gm([dao.u6+TINY,(1-dao.sp2)+TINY,dao.it+TINY,ef+TINY,(.5+.5*dm)+TINY]);
+    dao.ph=pf(dao.ph,PR*(.85+.25*ef));
+    const sd=.5+.5*dao.spu;
+    ha.l2e=lrp(ha.l2e,gm([cp.cce+TINY,cp.br+TINY,dao.ds+TINY,(dao.spu*S18)+TINY,(.5+.5*fd)+TINY]),ER);
+    ha.e2l=lrp(ha.e2l,gm([ms.re+TINY,cp.br+TINY,pr_(cp.cce+TINY,ms.re+TINY)+TINY,(dao.spu*S81)+TINY,(.5+.5*cp.sc)+TINY]),ER);
+    ha.lo=gm([ha.l2e+TINY,ha.e2l+TINY]);ha.ab=pr_(ha.l2e+TINY,ha.e2l+TINY);
+    ha.up=lrp(ha.up,gm([ms.re+TINY,cp.br+TINY,ha.ab+TINY]),ER);
+    ha.rf=gm([ha.lo+TINY,ha.up+TINY,cp.br+TINY]);
+    const eff=c01(ch+bond_ext*.15+boost_ext*PHI2*.10);
+    yang.ph=pf(yang.ph,CR*(.75+.25*eff)*sd*(.5+.5*ha.e2l));
+    yang.yr=lrp(yang.yr,sw(yang.ph),CR);yang.yi=c11(-yang.yr);
+    const ts=c11(PHI+(1-PHI)*c01(eff*(.5+.5*yin.xd)*(.5+.5*ms.pr)*sd));
+    yang.xl=lrp(yang.xl,-ts,ER);yang.gp=c01(Math.abs(ts*2)/2*(.5+.5*eff));
+    yang.io=gm([Math.abs(yang.yr)+TINY,yang.gp+TINY,(.5+.5*yin.xd)+TINY,sd+TINY]);
+    yin.xd=lrp(yin.xd,gm([Math.abs(yang.yi)+TINY,yang.gp+TINY,cp.cc+TINY,sd+TINY,(.5+.5*ha.l2e)+TINY]),CR);
+    yin.ph=pf(yin.ph,CR*(.6+.4*yin.xd));
+    const tg=EPS*sw(yin.ph);
+    yin.xc=gm([sc(tg,yang.yi,1)+TINY,yin.xd+TINY,yang.gp+TINY]);
+    yin.xf=c01(yin.xc*(.75+.25*coh.rf_));
+    yin.xm=lrp(yin.xm,c11(tg+yin.xf*(yang.yi<0?PHI:-PHI)),CR);
+    const os=c11(PHI+(1-PHI)*yin.xf);
+    yin.xl=lrp(yin.xl,-os,ER);yin.xr=lrp(yin.xr,os,ER);
+    cp.cc=lrp(cp.cc,gm([sc(yin.xm,yang.yi,1)+TINY,yin.xd+TINY,yang.io+TINY,yin.xf+TINY]),CR);
+    cp.cce=gm([cp.cc+TINY,yin.xf+TINY,sc(Math.abs(yang.yr),0,PHI)+TINY,yang.gp+TINY]);
+    cp.br=lrp(cp.br,gm([sc(yin.xl,-ts,1)+TINY,sc(yin.xr,ts,1)+TINY,cp.cce+TINY,.8+TINY,.8+TINY]),ER);
+    cp.ip=gm([cp.br+TINY,dao.u6+TINY,ls.sc+TINY,coh.rf_+TINY,c01(LIFE*PHI*dao.u6)+TINY]);
+    cp.op=c01(cp.cce*(1-cp.br)*(.5+.5*ms.pr));
+    cp.pc=gm([pr_(yin.xd+TINY,yang.gp+TINY)+TINY,pr_(cp.cc+TINY,cp.br+TINY)+TINY,dao.ds+TINY]);
+    cp.ce=gm([cp.cce+TINY,dao.rd+TINY,cp.br+TINY,cp.ip+TINY]);
+    cp.sc=gm([cp.cce+TINY,cp.br+TINY,cp.ip+TINY,cp.pc+TINY,(1-cp.op)+TINY]);
+    ms.fl=EPS*(1+.5*sw((s12.ph+s89.ph)/2));
+    ms.pu=lrp(ms.pu,gm([cp.cce*cp.br*cp.ip+TINY,cp.ce+TINY,(.5+.5*dao.spu)+TINY]),MR);
+    ms.tr=c01(ms.pu*cp.br*(1-cp.op)+ms.fl);
+    const dm2=gm([ms.pu+TINY,(.5+.5*cp.br)+TINY,cp.ip+TINY]);
+    function seam(s,drv,opp){
+      const anti=c01(pd(s.ph,opp)/.5);
+      s.pm=lrp(s.pm,c01(EPS+(1-EPS)*drv*dao.ds*cp.sc*sp(s.ph)*(.5+.5*anti)*(.7+.3*gm([dao.spu+TINY,cp.ce+TINY]))+rb*.08),SR*(.7+.3*dm));
+      s.ph=pf(s.ph,PR*(.5+.5*drv)*(.75+.25*dao.ds));
+      return{pm:s.pm};
+    }
+    const r12=seam(s12,dm2*(.65+.35*ha.up),s89.ph);
+    const r89=seam(s89,dm2*(.65+.35*ha.lo),s12.ph);
+    ms.o12=r12.pm;ms.o89=r89.pm;
+    ms.i12=c01(ms.o12*cp.op*(1-cp.br));ms.i89=c01(ms.o89*cp.op*(1-cp.br));
+    const mr=Math.max(ms.i12,ms.i89);
+    ms.re=gm([ms.o12+TINY,ms.o89+TINY,cp.br+TINY,cp.ip+TINY]);
+    ms.pm=c01(ms.re*(1-mr));ms.pr=c01(cp.op*(1-ms.re)+cp.cce*(1-cp.br));
+    ms.sc=gm([ms.pm+TINY,(1-ms.i12)+TINY,(1-ms.i89)+TINY,ms.re+TINY,ms.tr+TINY]);
+    const cv2=gm([dao.ds+TINY,dao.u6+TINY,cp.sc+TINY,cp.br+TINY,cp.ip+TINY,ms.sc+TINY,ms.re+TINY,ms.pm+TINY,ls.id+TINY,ls.co+TINY,(.5+.5*ref_.sr)+TINY,(.5+.5*ref_.rs)+TINY]);
+    const risk=c01(.28*dao.sp2+.22*mr+.18*(1-ls.id)+.16*(1-cp.sc)+.10*(1-ref_.sr)+.06*(1-ha.ab));
+    const us=c01(cv2*(1-risk)),res=c01(1-us);
+    const rel=c01(res*gm([ms.re+TINY,ms.pm+TINY,ls.id+TINY,dao.ds+TINY]));
+    const ip2=gm([res+TINY,(1-cv2)+TINY,dao.sp2+TINY,(1-cp.sc)+TINY,(1-ls.id)+TINY,mr+TINY,(1-ref_.sr)+TINY]);
+    inst.pl=lrp(inst.pl,ip2,COHR);inst.rl=lrp(inst.rl,c01(.65*inst.pl+.35*ip2),COHR);
+    const cap=c01(us*dm),er2=COHR*(.4+.6*cap);
+    coh.fr=lrp(coh.fr,gm([pr_(0.6+TINY,cp.sc+TINY)+TINY,ha.ab+TINY,(.5+.5*cv2)+TINY]),COHR);
+    coh.cf=lrp(coh.cf,c01(.42*cp.sc+.18*cp.br+.16*cp.ip+.24*coh.rf_),er2);
+    coh.rf_=lrp(coh.rf_,c01(.35*ref_.rf+.25*cv2+.20*ref_.rs+.20*cp.br),er2);
+    ls.id=c01(1-.1*(1-dao.ds));
+    ls.sh=lrp(ls.sh,c01(rel*(.6+.4*ms.tr)+coh.fr*.3),LR);
+    ls.sr=pr_(ls.sh+TINY,ls.sc+TINY);
+    ls.co=gm([ls.id+TINY,cp.pc+TINY,dao.ds+TINY,ms.sc+TINY,(.5+.5*ls.sr)+TINY]);
+    ls.sc=c01(ls.co*(.8+.15*coh.rf_+.05*coh.fr));
+    ref_.ae=lrp(ref_.ae,gm([dao.ds+TINY,ha.ab+TINY,ls.sc+TINY,ms.sc+TINY]),RR);
+    ref_.wi=lrp(ref_.wi,gm([ls.id+TINY,.8+TINY,(1-mr)+TINY,ls.sr+TINY]),RR);
+    ref_.rs=lrp(ref_.rs,gm([cp.ip+TINY,ha.rf+TINY,dao.u6+TINY,coh.fr+TINY]),RR);
+    ref_.gr=lrp(ref_.gr,gm([ref_.ae+TINY,ref_.wi+TINY,ref_.rs+TINY,ls.co+TINY]),RR);
+    ref_.sr=gm([ref_.ae+TINY,ref_.wi+TINY,ref_.gr+TINY]);
+    ref_.rf=c01(.35*ref_.sr+.25*ref_.rs+.15*ref_.gr+.05*cp.ce);
+    const phc=gm([cp.pc+TINY,pr_(cp.cce+TINY,cp.br+TINY)+TINY,dao.ds+TINY]);
+    const lk=c01(mr+cp.op*(1-cp.br));
+    const fus=gm([cp.cce+TINY,cp.br+TINY,cp.ip+TINY,phc+TINY,ms.pu+TINY,ha.rf+TINY,ls.sc+TINY])*(1-lk);
+    let rg='charging';
+    if(lk>.35&&lk>fus)rg='outer_inversion_risk';
+    else if(fus>.68&&cp.br>.62&&ms.sc>.50)rg='radiant_stable';
+    else if(cp.br>.55&&cp.ip>.50)rg='heart_folding';
+    else if(ms.re>.30)rg='membrane_pulse';
+    else if(cp.cce>.30)rg='center_contact';
+    return{conception:cp.ce,fusion:fus,schumann:dao.spu,arc:ha.ab,
+           open12:ms.o12,open89:ms.o89,shadow_rec:ls.sr,rg};
+  }
+  return{step,setField:(b,bo)=>{bond_ext=b;boost_ext=bo;}};
+}
+
+const N=12,motors=Array.from({length:N},()=>makeMotor());
+const phases=Array.from({length:N},(_,i)=>(i*PHI)%1);
+let bond_mat=Array.from({length:N},()=>new Float32Array(N));
+let geo=null,coup=null,bond_depth=0,field_boost=0;
+let prev_c=new Float32Array(N),field_schph=0,tick=0;
+
+(function initCoup(){
+  geo=Array.from({length:N},(_,i)=>{
+    const r=new Float32Array(N);let s=0;
+    for(let j=0;j<N;j++){
+      if(i===j){r[j]=0;continue;}
+      let d=Math.abs(phases[i]-phases[j]);d=Math.min(d,1-d);
+      const w=Math.max(0,1/(1+d/PHI)-.5)*2;r[j]=w;s+=w;
+    }
+    if(s>TINY)for(let j=0;j<N;j++)r[j]/=s;
+    else for(let j=0;j<N;j++)r[j]=j!==i?1/(N-1):0;
+    return r;
+  });
+  coup=geo.map(r=>r.slice());
+})();
+
+const COHR=PHI/21;
+let last_r=Array.from({length:N},()=>({conception:0,fusion:0,schumann:0,arc:.5,open12:.1,open89:.1,shadow_rec:.6,rg:'charging'}));
+
+function simStep(){
+  const spu=0.5-0.5*Math.cos(2*Math.PI*field_schph);
+  field_schph=(field_schph+((PHI2/8)*((7*(1/PHI-.5))/(7/PHI))))%1;
+  const ch=0.55+0.08*Math.sin(2*Math.PI*tick/144);
+  const concs=new Float32Array(N);
+  for(let i=0;i<N;i++){
+    let wfd=0;for(let j=0;j<N;j++)wfd+=coup[i][j]*prev_c[j];
+    const pfd=Math.max(0,Math.min(1,wfd*(0.5+0.5*(0.5-0.5*Math.cos(2*Math.PI*phases[i])))*(0.7+0.3*spu)));
+    const ec=Math.max(0,Math.min(1,ch+pfd*PHI*(1-phases[i]*PHI)*0.25));
+    const r=motors[i].step(ec,pfd);
+    concs[i]=r.conception;last_r[i]=r;
+  }
+  for(let i=0;i<N;i++)for(let j=0;j<N;j++){
+    if(i===j)continue;
+    const g2=Math.pow(Math.max(concs[i],TINY)*Math.max(concs[j],TINY),.5);
+    const sc2=Math.max(0,1-Math.abs(concs[i]-concs[j])/PHI);
+    bond_mat[i][j]+=(g2*sc2-bond_mat[i][j])*COHR;
+  }
+  for(let i=0;i<N;i++){
+    const row=new Float32Array(N);let s=0;
+    for(let j=0;j<N;j++){if(i===j)continue;row[j]=geo[i][j]*(0.5+0.5*bond_mat[i][j]);s+=row[j];}
+    if(s>TINY)for(let j=0;j<N;j++)coup[i][j]=row[j]/s;
+  }
+  let bd=0,cnt=0;
+  for(let i=0;i<N;i++)for(let j=0;j<N;j++){if(i!==j){bd+=bond_mat[i][j];cnt++;}}
+  bond_depth=cnt?bd/cnt:0;
+  field_boost=bond_depth>PHI?Math.max(0,Math.min(1,(bond_depth-PHI)*2)):0;
+  for(const m of motors)m.setField(bond_depth+field_boost*PHI2,field_boost);
+  prev_c.set(concs);tick++;
+}
+
+let actx=null,masterGain=null,osc_main=null,osc14=null,osc_sch=null;
+let gain_main=null,gain14=null,gain_sch=null,filt=null;
+let osc_l=null,osc_r=null,gain_l=null,gain_r=null;
+
+function initAudio(){
+  actx=new(window.AudioContext||window.webkitAudioContext)();
+  masterGain=actx.createGain();masterGain.gain.value=0;masterGain.connect(actx.destination);
+  filt=actx.createBiquadFilter();filt.type='lowpass';filt.frequency.value=1600;filt.Q.value=1.2;filt.connect(masterGain);
+  osc_main=actx.createOscillator();osc_main.type='sine';
+  gain_main=actx.createGain();gain_main.gain.value=0;
+  osc_main.connect(gain_main);gain_main.connect(filt);osc_main.start();
+  osc_sch=actx.createOscillator();osc_sch.type='sine';osc_sch.frequency.value=7.83;
+  gain_sch=actx.createGain();gain_sch.gain.value=0.12;
+  osc_sch.connect(gain_sch);gain_sch.connect(gain_main.gain);osc_sch.start();
+  osc14=actx.createOscillator();osc14.type='triangle';
+  gain14=actx.createGain();gain14.gain.value=0;
+  osc14.connect(gain14);gain14.connect(filt);osc14.start();
+  const pan_l=actx.createStereoPanner();pan_l.pan.value=-0.65;
+  const pan_r=actx.createStereoPanner();pan_r.pan.value=0.65;
+  gain_l=actx.createGain();gain_l.gain.value=0;
+  gain_r=actx.createGain();gain_r.gain.value=0;
+  osc_l=actx.createOscillator();osc_l.type='sine';
+  osc_r=actx.createOscillator();osc_r.type='sine';
+  osc_l.connect(gain_l);gain_l.connect(pan_l);pan_l.connect(masterGain);
+  osc_r.connect(gain_r);gain_r.connect(pan_r);pan_r.connect(masterGain);
+  osc_l.start();osc_r.start();
+}
+
+function updateAudio(r){
+  if(!actx||actx.state==='suspended')return;
+  const t=actx.currentTime,vol=parseInt(document.getElementById('vol').value)/100;
+  const penta=[1,1.125,1.25,1.5,1.667];
+  const base=180+r.conception*180;
+  const cl=penta.reduce((a,b)=>Math.abs(b-base/180)<Math.abs(a-base/180)?b:a);
+  const freq=180*cl;
+  osc_main.frequency.setTargetAtTime(freq,t,.08);
+  gain_main.gain.setTargetAtTime(r.fusion*.55*vol,t,.12);
+  osc14.frequency.setTargetAtTime(freq/PHI,t,.15);
+  gain14.gain.setTargetAtTime(field_boost*.35*vol,t,.2);
+  filt.frequency.setTargetAtTime(Math.abs(r.arc-PHI)<.06?2200:1200+r.shadow_rec*700,t,.2);
+  gain_sch.gain.setTargetAtTime(r.schumann*.16,t,.15);
+  osc_l.frequency.setTargetAtTime(freq*(12/13),t,.1);
+  osc_r.frequency.setTargetAtTime(freq*(8/9),t,.1);
+  gain_l.gain.setTargetAtTime(r.open12*.38*vol,t,.08);
+  gain_r.gain.setTargetAtTime(r.open89*.38*vol,t,.08);
+  masterGain.gain.setTargetAtTime(vol*.72,t,.05);
+}
+
+const HIST=680;
+const h_c=new Float32Array(HIST),h_f=new Float32Array(HIST),h_b=new Float32Array(HIST);
+const h_rg=new Array(HIST).fill('charging');let hp=0;
+const cv=document.getElementById('cv');const ctx2=cv.getContext('2d');
+const RCOL={radiant_stable:'#d4537e',heart_folding:'#7f77dd',center_contact:'#1d9e75',membrane_pulse:'#ef9f27',charging:'#5f5e5a',outer_inversion_risk:'#e24b4a'};
+
+function drawVis(r){
+  h_c[hp]=r.conception;h_f[hp]=r.fusion;h_b[hp]=bond_depth;h_rg[hp]=r.rg;hp=(hp+1)%HIST;
+  const W=cv.width,H=cv.height;ctx2.clearRect(0,0,W,H);
+  for(let x=0;x<HIST;x++){const b=h_b[(hp+x)%HIST];if(b>PHI){ctx2.fillStyle=`rgba(99,153,34,${Math.min(.2,(b-PHI)*3.5)})`;ctx2.fillRect(x,0,1,H);}}
+  const phy=H-PHI*H*.88-H*.06;
+  ctx2.strokeStyle='rgba(194,192,182,.15)';ctx2.lineWidth=.7;ctx2.setLineDash([3,5]);
+  ctx2.beginPath();ctx2.moveTo(0,phy);ctx2.lineTo(W,phy);ctx2.stroke();ctx2.setLineDash([]);
+  ctx2.fillStyle='rgba(194,192,182,.3)';ctx2.font='8px monospace';ctx2.fillText('φ',3,phy-3);
+  for(let x=0;x<HIST;x+=3){ctx2.fillStyle=RCOL[h_rg[(hp+x)%HIST]]||'#888';ctx2.globalAlpha=.4;ctx2.fillRect(x,H-5,3,5);}ctx2.globalAlpha=1;
+  function line(arr,col,al){ctx2.beginPath();let first=true;for(let x=0;x<HIST;x++){const v=arr[(hp+x)%HIST],py=H-v*H*.88-H*.06;if(first){ctx2.moveTo(x,py);first=false;}else ctx2.lineTo(x,py);}ctx2.strokeStyle=col;ctx2.globalAlpha=al;ctx2.lineWidth=1.4;ctx2.stroke();ctx2.globalAlpha=1;}
+  line(h_b,'#639922',.8);line(h_f,'#d4537e',.7);line(h_c,'#7f77dd',.6);
+  [['#639922','bond'],['#d4537e','fusion'],['#7f77dd','conception']].forEach(([c,l],i)=>{ctx2.fillStyle=c;ctx2.fillRect(6+i*80,H-17,8,3);ctx2.fillStyle='rgba(194,192,182,.45)';ctx2.font='8px monospace';ctx2.fillText(l,18+i*80,H-12);});
+}
+
+let running=false,aid=null,spd=5,prev14=false;
+
+function loop(){
+  if(!running){aid=null;return;}
+  simStep();
+  const avg_c=Array.from(last_r).reduce((s,x)=>s+x.conception,0)/N;
+  const avg_f=Array.from(last_r).reduce((s,x)=>s+x.fusion,0)/N;
+  const r={...last_r[Math.floor(N/2)],conception:avg_c,fusion:avg_f};
+  drawVis(r);updateAudio(r);
+  document.getElementById('v_c').textContent=avg_c.toFixed(3);
+  document.getElementById('v_f').textContent=avg_f.toFixed(3);
+  document.getElementById('v_b').textContent=bond_depth.toFixed(3);
+  const n14=field_boost>0;
+  document.getElementById('v_14').textContent=n14?'boost '+field_boost.toFixed(3):'—';
+  document.getElementById('c14').classList.toggle('on',n14);
+  const RL={radiant_stable:'radiant stable',heart_folding:'heart folding',center_contact:'center contact',membrane_pulse:'membrane pulse',charging:'charging',outer_inversion_risk:'inversion risk'};
+  document.getElementById('phase_label').textContent=RL[r.rg]||r.rg;
+  document.getElementById('t_val').textContent=tick;
+  if(n14&&!prev14){
+    document.getElementById('n14_label').textContent=`✦ node 14 (t=${tick}, bond=${bond_depth.toFixed(4)})`;
+    const log=document.getElementById('log');
+    log.innerHTML=`t=${tick} · bond=${bond_depth.toFixed(4)} · boost=${field_boost.toFixed(4)} · beyond φ=${(bond_depth-PHI).toFixed(4)}<br>`+log.innerHTML.split('<br>').slice(0,4).join('<br>');
+  }
+  if(!n14&&prev14)document.getElementById('n14_label').textContent='';
+  prev14=n14;
+  aid=setTimeout(loop,Math.max(10,80/spd));
+}
+
+document.getElementById('btn_start').onclick=async()=>{
+  if(!actx)initAudio();
+  if(actx.state==='suspended')await actx.resume();
+  masterGain.gain.setTargetAtTime(parseInt(document.getElementById('vol').value)/100*.72,actx.currentTime,.1);
+  running=true;
+  document.getElementById('btn_start').disabled=true;
+  document.getElementById('btn_stop').disabled=false;
+  document.getElementById('btn_start').classList.add('active');
+  loop();
+};
+document.getElementById('btn_stop').onclick=()=>{
+  running=false;
+  if(actx)masterGain.gain.setTargetAtTime(0,actx.currentTime,.3);
+  document.getElementById('btn_start').disabled=false;
+  document.getElementById('btn_stop').disabled=true;
+  document.getElementById('btn_start').classList.remove('active');
+};
+document.getElementById('vol').oninput=e=>{
+  document.getElementById('vol_v').textContent=e.target.value;
+  if(actx&&running)masterGain.gain.setTargetAtTime(+e.target.value/100*.72,actx.currentTime,.05);
+};
+document.getElementById('spd').oninput=e=>{spd=+e.target.value;document.getElementById('spd_v').textContent=e.target.value;};
+
+</script>
+</body>
+</html>
